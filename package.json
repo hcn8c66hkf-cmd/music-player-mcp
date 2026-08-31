@@ -1,0 +1,12 @@
+{
+  "name": "music-player-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An MCP Apps music-player widget backed by a separately configured Netease-compatible API.",
+  "scripts": { "build:widget": "node scripts/build-widget.mjs" },
+  "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.5",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.3"
+  }
+}

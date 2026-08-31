@@ -1,0 +1,12 @@
+node_modules/
+.npm-cache/
+dist/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+music_cookie.txt

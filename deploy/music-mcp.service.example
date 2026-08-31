@@ -1,0 +1,15 @@
+[Unit]
+Description=Music Player MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/opt/music-player-mcp
+EnvironmentFile=/etc/music-player-mcp.env
+ExecStart=/opt/music-player-mcp/.venv/bin/python /opt/music-player-mcp/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
