@@ -32,6 +32,7 @@ WIDGET_JS_PATH = BASE_DIR / "dist" / "widget" / "music-player-widget.global.js"
 
 NCM_API_BASE_URL = os.getenv("NCM_API_BASE_URL", "http://127.0.0.1:3939").rstrip("/")
 NCM_COOKIE_FILE = os.getenv("NCM_COOKIE_FILE", "")
+NCM_COOKIE = os.getenv("NCM_COOKIE", "").strip()
 APP_HOST = os.getenv("APP_HOST", os.getenv("MCP_HOST", "127.0.0.1"))
 APP_PORT = int(os.getenv("PORT", os.getenv("APP_PORT", os.getenv("MCP_PORT", "3941"))))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", f"http://127.0.0.1:{APP_PORT}").rstrip("/")
@@ -161,12 +162,15 @@ class MusicPayload(BaseModel):
 
 
 def get_cookie() -> str:
-    if not NCM_COOKIE_FILE:
-        return ""
-    try:
-        return Path(NCM_COOKIE_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+    """Load the private login cookie without ever returning it to clients."""
+    if NCM_COOKIE_FILE:
+        try:
+            value = Path(NCM_COOKIE_FILE).read_text(encoding="utf-8").strip()
+            if value:
+                return value
+        except OSError:
+            pass
+    return NCM_COOKIE
 
 
 async def ncm_get(path: str) -> dict:
