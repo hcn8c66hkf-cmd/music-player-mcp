@@ -1,35 +1,42 @@
-# Music Player MCP
+# Music Player MCP · Shared Listening Edition
 
-一个基于 [Model Context Protocol](https://modelcontextprotocol.io/) 与 `@modelcontextprotocol/ext-apps` 的聊天内音乐播放器。它提供搜索播放与按歌曲 ID 播放两项工具，并返回可播放的音乐卡片数据。
+一个可在支持 MCP Apps 的聊天客户端里直接渲染的音乐播放器，并带有真实、持久、可查询的共同收听状态。
 
-> 这是一份可部署的源码，不附带网易云账号 Cookie、密钥、音乐文件、歌词或封面资源。使用者必须自行配置兼容的音乐数据 API，并自行遵守数据源与音乐版权方的条款。
+本分支保留原项目的搜索、按歌曲 ID 播放、封面、歌词和聊天内 widget，同时补上共同状态架构中最重要的第一层：只有用户真的点击播放后，系统才记录为“正在听”；暂停、继续、自然播完、关闭页面都会形成对应事件，模型可通过结构化工具读取事实状态。
 
-## 它如何工作
+> 源码不附带网易云账号 Cookie、密钥、音乐文件、歌词或封面资源。使用者必须自行配置兼容的音乐数据 API，并遵守数据源与音乐版权方的条款。
 
-1. 模型调用 `play_music` 搜索歌名，或调用 `play_music_by_id` 直接播放歌曲 ID。
-2. MCP 向配置好的、Netease/网易云兼容 API 查询搜索结果、歌曲信息、封面、歌词与临时播放地址。
-3. 服务将音频地址经受限的音频代理返回，播放器使用浏览器 `<audio>` 播放，支持暂停、拖动进度和歌词时间轴。
-4. `@modelcontextprotocol/ext-apps` 客户端会读取工具的 widget 元数据，直接把 `widget-src/music-player-widget.ts` 构建出的界面渲染为卡片。
+## 已有能力
 
-网易云的播放 URL 通常是临时的，约 **20 分钟** 后可能失效；这不是播放器永久保存的下载链接。失效后应重新调用播放工具获取新链接，而不是重试旧 URL。
-
-## 工具
-
-| 工具 | 用途 |
+| 能力 | 说明 |
 | --- | --- |
-| `play_music` | 输入歌名或关键词，搜索第一条可播放结果并显示播放器。 |
-| `play_music_by_id` | 输入网易云歌曲 ID，直接生成播放器。 |
+| `play_music` | 搜索前 5 条结果，取第一首真实可播放歌曲并生成卡片。 |
+| `play_music_by_id` | 按网易云歌曲 ID 验证并生成卡片。 |
+| `get_music_session` | 返回紧凑的当前状态和最近 5 条共听事件。 |
+| 单服务部署 | MCP、签名音频流、事件上报和健康检查共用一个端口。 |
+| 真实播放事件 | `play / pause / resume / finish / close` 由播放器实际行为触发。 |
+| 持久状态 | SQLite 事务写入，默认保留最近 500 条事件。 |
+| 活跃租约 | 默认 2 小时；陈旧的播放记录不会被误称为“正在听”。 |
+| 隐私边界 | Cookie、临时 CDN URL 和完整歌词不进入共同状态。 |
 
-两项工具均可传入 `color_primary`、`color_secondary` 与 `color_bg`，自定义卡片颜色。
+歌单导入、共享队列、跨页面唯一播放器、今日私选和反馈是下一阶段能力；它们应继续进入同一条播放链路，而不是再造第二个播放器。
 
-## 快速开始
+## 请求流
+
+1. 模型调用 `play_music` 或 `play_music_by_id`。
+2. 服务从私有 Netease-compatible API 获取详情、歌词，并验证真实音源。
+3. 工具返回聊天内播放器，以及只对这一首歌有效的签名播放令牌。
+4. 用户点击播放时，服务重新解析临时音源并通过稳定的 Range 流输出。
+5. 播放器成功开始后才写入 `play`；后续状态也由真实播放器事件写入。
+6. 模型调用 `get_music_session` 后，才能据此描述当前是否正在共听。
+
+工具结果和数据库都不会保存上游临时音频 URL。
+
+## 单机快速开始
 
 需要 Python 3.11+、Node.js 20+，以及一个单独运行的 Netease-compatible API。
 
 ```bash
-git clone <your-repository-url>
-cd music-player-mcp
-
 python -m venv .venv
 # Linux/macOS
 source .venv/bin/activate
@@ -37,48 +44,89 @@ source .venv/bin/activate
 # .\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-npm install
+npm ci
 npm run build:widget
-```
-
-复制并修改环境变量：
-
-```bash
 cp .env.example .env
 ```
 
-然后由你的进程管理器加载这些变量并启动：
+生成签名密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+把结果放入私有环境变量 `MUSIC_EVENT_SIGNING_SECRET`，再配置：
+
+```dotenv
+NCM_API_BASE_URL=http://127.0.0.1:3939
+PUBLIC_BASE_URL=https://music.example.com
+APP_HOST=127.0.0.1
+APP_PORT=3941
+MUSIC_STATE_PATH=./data/music_state.db
+```
+
+由进程管理器加载环境变量后启动：
 
 ```bash
 python server.py
 ```
 
-默认情况下，MCP 监听 `127.0.0.1:3941`，音频代理监听 `127.0.0.1:3942`。生产环境应使用 Nginx 或 Caddy 暴露 HTTPS 路径，示例见 [部署说明](docs/DEPLOYMENT.md)。
-
-## 客户端兼容性
-
-### 支持 MCP Apps / ext-apps 的客户端
-
-将公开的 streamable HTTP MCP 地址添加为连接器即可。只要客户端能够识别 `@modelcontextprotocol/ext-apps` 和工具的 output template，它会自动渲染播放器 widget，不需要再写前端页面。
-
-### 自己写的聊天前端
-
-普通网页聊天不会因为“连接了 MCP”就自动拥有卡片组件。它需要读取工具结果，并将其转换为自己的音乐消息卡片；数据结构和推荐接入方式见 [自定义前端适配](docs/CUSTOM-FRONTEND.md)。
-
-你不需要开源自己的整套聊天应用。把这份 MCP 服务开源，再提供这一页适配说明即可。
-
-## 安全与发布前检查
-
-- `.env`、Cookie 文件、访问令牌与私有域名均不应提交。
-- 本项目的音频代理只允许 `ALLOWED_AUDIO_HOST_SUFFIXES` 中的域名，避免成为任意 URL 的开放代理。
-- 不要把音频、歌词、封面或歌曲目录打包进仓库；均应由运行时请求得到。
-- 发布 GitHub 前请自行选择并添加许可证文件；当前仓库未预设许可证。
-
-## 开发结构
+公开连接地址为：
 
 ```text
-server.py                         # FastMCP、音乐数据请求与受限音频代理
-widget-src/music-player-widget.ts # ext-apps 播放器源码
-scripts/build-widget.mjs          # 构建 dist/widget/ 的脚本
-docs/                             # 部署与自定义前端接入说明
+https://music.example.com/mcp
+```
+
+健康检查为 `GET /health`。
+
+## 最省事的 Docker Compose
+
+仓库附带 `compose.yaml`，会同时启动：
+
+- 只在容器内网开放的、持续维护的 Netease-compatible API；
+- 对外开放的播放器 MCP；
+- 保存共同状态的 Docker volume。
+
+先复制 `.env.example` 为 `.env`，至少填写真实的 `PUBLIC_BASE_URL` 和随机的 `MUSIC_EVENT_SIGNING_SECRET`，然后：
+
+```bash
+docker compose up -d --build
+```
+
+音乐源使用维护中的 `moefurina/ncm-api` 镜像，只通过内部网络供播放器访问，不直接暴露 3000 端口。
+
+## 只运行播放器容器
+
+```bash
+docker build -t music-player-mcp .
+docker run --rm -p 3941:3941 \
+  --env-file .env \
+  -v music-player-data:/data \
+  music-player-mcp
+```
+
+容器默认监听 `0.0.0.0:3941`，SQLite 位于 `/data/music_state.db`。生产环境必须挂载持久卷，否则重新部署会丢失共同状态。
+
+## 部署与安全
+
+详细反向代理和持久化要求见 [部署说明](docs/DEPLOYMENT.md)。自建聊天前端的数据契约见 [自定义前端适配](docs/CUSTOM-FRONTEND.md)。
+
+- `NCM_COOKIE_FILE` 只指向服务端私有文件；不要把 Cookie 放进环境变量日志、Git、聊天消息或前端。
+- `MUSIC_EVENT_SIGNING_SECRET` 必须是随机长值。播放器只拿到限时签名令牌，拿不到密钥。
+- 音频流只接受签名歌曲令牌；服务端再解析白名单 CDN，不提供任意 URL 代理。
+- 所有跳转都重新检查音频域名，最多跟随 3 次跳转。
+- 共同状态只保留歌曲元数据、动作、选择者、进度和时间。
+
+## 开发
+
+```bash
+python -m pytest -q
+npm run build:widget
+```
+
+```text
+server.py                         # MCP、签名音频流、事件接口
+music_state.py                    # SQLite 状态账本与签名令牌
+widget-src/music-player-widget.ts # MCP Apps 播放器和真实事件上报
+tests/                            # 状态、令牌和 HTTP 路由测试
 ```

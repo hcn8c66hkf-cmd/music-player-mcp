@@ -2,9 +2,14 @@ import { App } from "@modelcontextprotocol/ext-apps";
 
 interface MusicData {
   audioUrl: string;
+  eventUrl: string;
+  eventToken: string;
+  songId: number;
   coverUrl: string;
   songName: string;
   artistName: string;
+  albumName: string;
+  selectedBy: "user" | "companion";
   duration: number;
   lyrics: string;
   colorPrimary: string;
@@ -37,9 +42,14 @@ function coerce(data: unknown): MusicData | null {
   const num = (v: unknown, fb: number) => (typeof v === "number" && isFinite(v) ? v : fb);
   return {
     audioUrl: d.audioUrl,
+    eventUrl: str(d.eventUrl, ""),
+    eventToken: str(d.eventToken, ""),
+    songId: num(d.songId, 0),
     coverUrl: str(d.coverUrl, ""),
     songName: str(d.songName, "未知歌曲"),
     artistName: str(d.artistName, "未知歌手"),
+    albumName: str(d.albumName, ""),
+    selectedBy: d.selectedBy === "companion" ? "companion" : "user",
     duration: num(d.duration, 0),
     lyrics: str(d.lyrics, ""),
     colorPrimary: str(d.colorPrimary, "#6e7c87"),
@@ -66,7 +76,6 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
   const lyricLines = parseLRC(data.lyrics);
   const hasLyrics = lyricLines.length > 0;
   let lyricsOpen = false;
-  let blobUrl: string | null = null;
   let audioReady = false;
 
   // ── 外层容器 ──
@@ -153,7 +162,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
 
   // 歌手
   const artist = document.createElement("div");
-  artist.textContent = data.artistName;
+  artist.textContent = `${data.artistName}${data.selectedBy === "companion" ? " · 我选的" : " · 你点的"}`;
   artist.style.cssText = `font-size:10px;color:rgba(255,255,255,0.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-2px;`;
   content.appendChild(artist);
 
@@ -252,25 +261,42 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
   const audio = document.createElement("audio");
   audio.preload = "auto";
   let playing = false;
+  let hasStarted = false;
+  let finished = false;
+  let closeReported = false;
   let raf = 0;
   let realDuration = data.duration;
   let activeLyricIdx = -1;
 
-  // 预加载音频到blob解决seek问题
+  const reportPlaybackEvent = (eventType: "play" | "pause" | "resume" | "finish" | "close", beacon = false) => {
+    if (!data.eventUrl || !data.eventToken) return;
+    const body = JSON.stringify({
+      token: data.eventToken,
+      event_type: eventType,
+      actor: "user",
+      position: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    });
+    if (beacon && navigator.sendBeacon) {
+      navigator.sendBeacon(data.eventUrl, new Blob([body], { type: "text/plain;charset=UTF-8" }));
+      return;
+    }
+    void fetch(data.eventUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body,
+      keepalive: true,
+      credentials: "omit",
+    }).catch((error) => console.debug("[music] event report skipped:", error));
+  };
+
+  // The server exposes a stable signed stream with Range support, so playback
+  // can start immediately instead of downloading the entire song into a Blob.
   const preloadAudio = async () => {
     loadingEl.style.display = "flex";
     iPlay.style.opacity = "0";
-    try {
-      const resp = await fetch(data.audioUrl);
-      const blob = await resp.blob();
-      blobUrl = URL.createObjectURL(blob);
-      audio.src = blobUrl;
-      audioReady = true;
-    } catch (e) {
-      console.warn("[music] preload failed, using direct URL");
-      audio.src = data.audioUrl;
-      audioReady = true;
-    }
+    audio.src = data.audioUrl;
+    audio.load();
+    audioReady = true;
     loadingEl.style.display = "none";
     iPlay.style.opacity = "1";
   };
@@ -320,13 +346,18 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
       iPause.style.display = "none";
       dot.style.opacity = "0";
       cancelAnimationFrame(raf);
+      reportPlaybackEvent("pause");
     } else {
       audio.play().then(() => {
         playing = true;
+        const eventType = hasStarted ? "resume" : "play";
+        hasStarted = true;
+        finished = false;
         iPlay.style.display = "none";
         iPause.style.display = "block";
         dot.style.opacity = "1";
         tick();
+        reportPlaybackEvent(eventType);
       }).catch((e) => console.warn("[music] playback failed:", e));
     }
   };
@@ -354,6 +385,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
 
   audio.addEventListener("ended", () => {
     playing = false;
+    finished = true;
     iPlay.style.display = "block";
     iPause.style.display = "none";
     dot.style.opacity = "0";
@@ -361,6 +393,13 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
     progressFill.style.width = "0%";
     timeEl.textContent = fmtTime(realDuration);
     activeLyricIdx = -1;
+    reportPlaybackEvent("finish");
+  });
+
+  window.addEventListener("pagehide", () => {
+    if (!hasStarted || finished || closeReported) return;
+    closeReported = true;
+    reportPlaybackEvent("close", true);
   });
 
   // ── 报告高度 ──

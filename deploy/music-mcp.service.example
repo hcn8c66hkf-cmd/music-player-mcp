@@ -1,5 +1,5 @@
 [Unit]
-Description=Music Player MCP Server
+Description=Music Player MCP Shared Listening Server
 After=network.target
 
 [Service]
@@ -10,6 +10,8 @@ EnvironmentFile=/etc/music-player-mcp.env
 ExecStart=/opt/music-player-mcp/.venv/bin/python /opt/music-player-mcp/server.py
 Restart=always
 RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

@@ -1,3 +1,4 @@
-mcp[cli]
-aiohttp
-pydantic
+mcp[cli]==1.29.1
+httpx==0.28.1
+pydantic==2.13.5
+uvicorn==0.52.4

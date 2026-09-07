@@ -1,0 +1,35 @@
+services:
+  music-source:
+    image: moefurina/ncm-api:latest
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      ENABLE_GENERAL_UNBLOCK: "false"
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      no_proxy: ""
+      NO_PROXY: ""
+    expose:
+      - "3000"
+
+  music-player:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - music-source
+    env_file:
+      - .env
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "3941"
+      NCM_API_BASE_URL: http://music-source:3000
+      MUSIC_STATE_PATH: /data/music_state.db
+    ports:
+      - "3941:3941"
+    volumes:
+      - music-player-data:/data
+
+volumes:
+  music-player-data:
