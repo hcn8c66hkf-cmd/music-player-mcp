@@ -19,7 +19,6 @@ COPY server.py music_state.py ./
 COPY --from=widget /src/dist ./dist
 RUN useradd --create-home --uid 10001 music && mkdir -p /data && chown music:music /data
 USER music
-VOLUME ["/data"]
 EXPOSE 3941
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3941/health', timeout=3)"
