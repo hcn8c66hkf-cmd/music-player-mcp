@@ -33,6 +33,8 @@ WIDGET_JS_PATH = BASE_DIR / "dist" / "widget" / "music-player-widget.global.js"
 NCM_API_BASE_URL = os.getenv("NCM_API_BASE_URL", "http://127.0.0.1:3939").rstrip("/")
 NCM_COOKIE_FILE = os.getenv("NCM_COOKIE_FILE", "")
 NCM_COOKIE = os.getenv("NCM_COOKIE", "").strip()
+NCM_RETRYABLE_STATUS_CODES = frozenset({502, 503, 504})
+NCM_RETRY_DELAYS_SECONDS = (0.0, 2.0, 5.0, 10.0, 15.0)
 APP_HOST = os.getenv("APP_HOST", os.getenv("MCP_HOST", "127.0.0.1"))
 APP_PORT = int(os.getenv("PORT", os.getenv("APP_PORT", os.getenv("MCP_PORT", "3941"))))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", f"http://127.0.0.1:{APP_PORT}").rstrip("/")
@@ -174,13 +176,45 @@ def get_cookie() -> str:
 
 
 async def ncm_get(path: str) -> dict:
+    """Call the private Netease-compatible API and tolerate Render cold starts."""
     cookie = get_cookie()
-    separator = "&" if "?" in path else "?"
-    url = f"{NCM_API_BASE_URL}{path}{separator}cookie={quote(cookie, safe='')}" if cookie else f"{NCM_API_BASE_URL}{path}"
+    url = f"{NCM_API_BASE_URL}{path}"
+    headers = {"Cookie": cookie, "User-Agent": "Mozilla/5.0"} if cookie else {"User-Agent": "Mozilla/5.0"}
+
     async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.json()
+        for attempt, delay in enumerate(NCM_RETRY_DELAYS_SECONDS):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                response = await client.get(url, headers=headers)
+            except (httpx.TimeoutException, httpx.NetworkError) as error:
+                if attempt == len(NCM_RETRY_DELAYS_SECONDS) - 1:
+                    raise RuntimeError("NCM upstream request failed after retries") from error
+                LOGGER.warning(
+                    "NCM upstream request failed; retrying cold-start request (%d/%d)",
+                    attempt + 1,
+                    len(NCM_RETRY_DELAYS_SECONDS),
+                )
+                continue
+
+            if response.status_code in NCM_RETRYABLE_STATUS_CODES:
+                if attempt < len(NCM_RETRY_DELAYS_SECONDS) - 1:
+                    await response.aclose()
+                    LOGGER.warning(
+                        "NCM upstream returned HTTP %s; retrying cold-start request (%d/%d)",
+                        response.status_code,
+                        attempt + 1,
+                        len(NCM_RETRY_DELAYS_SECONDS),
+                    )
+                    continue
+                raise RuntimeError(
+                    f"NCM upstream unavailable after retries (HTTP {response.status_code})"
+                )
+
+            response.raise_for_status()
+            return response.json()
+
+    raise RuntimeError("NCM upstream request failed after retries")
 
 
 def is_allowed_audio_url(value: str) -> bool:
