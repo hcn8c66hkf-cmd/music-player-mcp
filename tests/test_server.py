@@ -96,3 +96,26 @@ def test_ncm_get_retries_cold_start_and_keeps_cookie_out_of_url(monkeypatch):
     assert len(fake_client.calls) == 3
     assert "MUSIC_U" not in fake_client.calls[0][0]
     assert fake_client.calls[0][1]["Cookie"] == "MUSIC_U=secret"
+
+def test_warm_ncm_source_retries_until_ready(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse(502 if len(calls) < 3 else 200)
+
+    monkeypatch.setattr(server.httpx, "get", fake_get)
+    monkeypatch.setattr(server.time, "sleep", lambda _: None)
+    monkeypatch.setattr(server, "NCM_API_BASE_URL", "https://ncm.test")
+    monkeypatch.setattr(server, "NCM_WARMUP_DELAYS_SECONDS", (0.0, 0.0, 0.0))
+
+    server.warm_ncm_source()
+
+    assert len(calls) == 3
+    assert calls[0][0] == "https://ncm.test/search?keywords=warmup&limit=1"
+    assert calls[0][1]["follow_redirects"] is False
+
