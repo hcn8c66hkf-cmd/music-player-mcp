@@ -12,6 +12,8 @@ import json
 import logging
 import os
 import secrets
+import threading
+import time
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote, urljoin, urlparse
@@ -35,6 +37,7 @@ NCM_COOKIE_FILE = os.getenv("NCM_COOKIE_FILE", "")
 NCM_COOKIE = os.getenv("NCM_COOKIE", "").strip()
 NCM_RETRYABLE_STATUS_CODES = frozenset({502, 503, 504})
 NCM_RETRY_DELAYS_SECONDS = (0.0, 2.0, 5.0, 10.0, 15.0)
+NCM_WARMUP_DELAYS_SECONDS = (0.0, 5.0, 10.0, 15.0, 20.0, 30.0)
 APP_HOST = os.getenv("APP_HOST", os.getenv("MCP_HOST", "127.0.0.1"))
 APP_PORT = int(os.getenv("PORT", os.getenv("APP_PORT", os.getenv("MCP_PORT", "3941"))))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", f"http://127.0.0.1:{APP_PORT}").rstrip("/")
@@ -215,6 +218,28 @@ async def ncm_get(path: str) -> dict:
             return response.json()
 
     raise RuntimeError("NCM upstream request failed after retries")
+
+
+def warm_ncm_source() -> None:
+    """Wake a sleeping Render music-source instance without blocking MCP startup."""
+    url = f"{NCM_API_BASE_URL}/search?keywords=warmup&limit=1"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for attempt, delay in enumerate(NCM_WARMUP_DELAYS_SECONDS):
+        if delay:
+            time.sleep(delay)
+        try:
+            response = httpx.get(url, headers=headers, timeout=15, follow_redirects=False)
+            if response.status_code not in NCM_RETRYABLE_STATUS_CODES:
+                LOGGER.info("NCM upstream warmup ready (HTTP %s)", response.status_code)
+                return
+        except httpx.HTTPError:
+            pass
+        LOGGER.info(
+            "NCM upstream still waking (%d/%d)",
+            attempt + 1,
+            len(NCM_WARMUP_DELAYS_SECONDS),
+        )
+    LOGGER.warning("NCM upstream did not become ready during background warmup")
 
 
 def is_allowed_audio_url(value: str) -> bool:
@@ -446,4 +471,5 @@ async def health(_: Request) -> Response:
 
 
 if __name__ == "__main__":
+    threading.Thread(target=warm_ncm_source, name="ncm-warmup", daemon=True).start()
     uvicorn.run(mcp.streamable_http_app(), host=APP_HOST, port=APP_PORT)
