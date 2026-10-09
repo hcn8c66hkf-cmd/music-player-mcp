@@ -90,7 +90,6 @@ def test_ncm_get_retries_cold_start_and_keeps_cookie_out_of_url(monkeypatch):
     monkeypatch.setattr(server, "NCM_API_BASE_URL", "https://ncm.test")
     monkeypatch.setattr(server, "NCM_COOKIE", "MUSIC_U=secret")
     monkeypatch.setattr(server, "NCM_RETRY_DELAYS_SECONDS", (0.0, 0.0, 0.0))
-    monkeypatch.setattr(server.asyncio, "sleep", lambda _: asyncio.sleep(0))
 
     result = asyncio.run(server.ncm_get("/search?keywords=test"))
     assert result == {"result": {"songs": []}}
