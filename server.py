@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import secrets
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -37,7 +38,9 @@ NCM_COOKIE_FILE = os.getenv("NCM_COOKIE_FILE", "")
 NCM_COOKIE = os.getenv("NCM_COOKIE", "").strip()
 NCM_RETRYABLE_STATUS_CODES = frozenset({502, 503, 504})
 NCM_RETRY_DELAYS_SECONDS = (0.0, 2.0, 5.0, 10.0, 15.0)
-NCM_WARMUP_DELAYS_SECONDS = (0.0, 5.0, 10.0, 15.0, 20.0, 30.0)
+NCM_WARMUP_DELAYS_SECONDS = (0.0, 2.0, 5.0, 10.0, 15.0, 20.0)
+BUNDLED_NCM_DIR = Path(os.getenv("BUNDLED_NCM_DIR", str(BASE_DIR / "vendor" / "ncm-api")))
+BUNDLED_NCM_PORT = int(os.getenv("BUNDLED_NCM_PORT", "3000"))
 APP_HOST = os.getenv("APP_HOST", os.getenv("MCP_HOST", "127.0.0.1"))
 APP_PORT = int(os.getenv("PORT", os.getenv("APP_PORT", os.getenv("MCP_PORT", "3941"))))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", f"http://127.0.0.1:{APP_PORT}").rstrip("/")
@@ -218,6 +221,47 @@ async def ncm_get(path: str) -> dict:
             return response.json()
 
     raise RuntimeError("NCM upstream request failed after retries")
+
+
+def start_bundled_ncm() -> subprocess.Popen | None:
+    """Start the vendored Netease-compatible API beside the MCP process."""
+    entrypoint = BUNDLED_NCM_DIR / "app.js"
+    if not entrypoint.exists():
+        LOGGER.info("Bundled NCM source not found; using configured external upstream")
+        return None
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PORT": str(BUNDLED_NCM_PORT),
+            "NODE_ENV": "production",
+            "ENABLE_GENERAL_UNBLOCK": "false",
+            "http_proxy": "",
+            "https_proxy": "",
+            "HTTP_PROXY": "",
+            "HTTPS_PROXY": "",
+            "no_proxy": "",
+            "NO_PROXY": "",
+        }
+    )
+    process = subprocess.Popen(
+        ["node", "app.js"],
+        cwd=BUNDLED_NCM_DIR,
+        env=environment,
+    )
+    LOGGER.info("Bundled NCM source started on 127.0.0.1:%d", BUNDLED_NCM_PORT)
+    return process
+
+
+def stop_bundled_ncm(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
 
 
 def warm_ncm_source() -> None:
@@ -471,5 +515,9 @@ async def health(_: Request) -> Response:
 
 
 if __name__ == "__main__":
+    bundled_ncm = start_bundled_ncm()
     threading.Thread(target=warm_ncm_source, name="ncm-warmup", daemon=True).start()
-    uvicorn.run(mcp.streamable_http_app(), host=APP_HOST, port=APP_PORT)
+    try:
+        uvicorn.run(mcp.streamable_http_app(), host=APP_HOST, port=APP_PORT)
+    finally:
+        stop_bundled_ncm(bundled_ncm)
