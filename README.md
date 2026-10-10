@@ -34,7 +34,7 @@
 
 ## 单机快速开始
 
-需要 Python 3.11+、Node.js 20+，以及一个单独运行的 Netease-compatible API。
+需要 Python 3.11+ 和 Node.js 20+。`npm ci` 会安装固定版本的 Netease-compatible API；启动 `server.py` 时若检测到该本地副本，会自动将它作为同服务子进程拉起。也可以通过 `NCM_API_BASE_URL` 改用外部 API。
 
 ```bash
 python -m venv .venv
@@ -78,6 +78,17 @@ https://music.example.com/mcp
 ```
 
 健康检查为 `GET /health`。
+
+## Render 免费部署
+
+当前仓库可以把播放器和音乐源合并在同一个 Render Web Service 中，避免两个免费实例先后休眠：
+
+- 构建命令保持 `npm ci && npm run build:widget && pip install --no-cache-dir -r requirements.txt`；
+- 启动命令保持 `python server.py`；
+- 设置 `NCM_API_BASE_URL=http://127.0.0.1:3000`；
+- Cookie、公开地址和签名密钥继续使用私有环境变量。
+
+首次请求只需要唤醒一个免费实例。本地 SQLite 仍会在免费实例重启或休眠时丢失，若需要长期保存共听记录，应换用外部数据库或付费持久盘。
 
 ## 最省事的 Docker Compose
 
