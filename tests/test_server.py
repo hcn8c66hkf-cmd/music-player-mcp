@@ -119,3 +119,41 @@ def test_warm_ncm_source_retries_until_ready(monkeypatch):
     assert calls[0][0] == "https://ncm.test/search?keywords=warmup&limit=1"
     assert calls[0][1]["follow_redirects"] is False
 
+def test_bundled_ncm_process_lifecycle(tmp_path, monkeypatch):
+    (tmp_path / "app.js").write_text("// test", encoding="utf-8")
+    monkeypatch.setattr(server, "BUNDLED_NCM_DIR", tmp_path)
+    monkeypatch.setattr(server, "BUNDLED_NCM_PORT", 3456)
+    captured = {}
+
+    class FakeProcess:
+        def __init__(self):
+            self.terminated = False
+            self.waited = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            self.waited = timeout
+
+    fake_process = FakeProcess()
+
+    def fake_popen(command, cwd, env):
+        captured.update(command=command, cwd=cwd, env=env)
+        return fake_process
+
+    monkeypatch.setattr(server.subprocess, "Popen", fake_popen)
+
+    process = server.start_bundled_ncm()
+    assert process is fake_process
+    assert captured["command"] == ["node", "app.js"]
+    assert captured["cwd"] == tmp_path
+    assert captured["env"]["PORT"] == "3456"
+
+    server.stop_bundled_ncm(process)
+    assert fake_process.terminated is True
+    assert fake_process.waited == 10
+
