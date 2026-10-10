@@ -3,7 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "description": "An MCP Apps music player with signed streaming and durable shared-listening state.",
-  "scripts": { "build:widget": "node scripts/build-widget.mjs" },
+  "scripts": {
+    "postinstall": "node scripts/install-ncm.mjs",
+    "build:widget": "node scripts/build-widget.mjs"
+  },
   "devDependencies": {
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "tsup": "^8.5.1",
