@@ -1,8 +1,8 @@
 FROM node:20-bookworm-slim AS widget
 WORKDIR /src
 COPY package.json package-lock.json ./
-RUN npm ci
 COPY scripts ./scripts
+RUN npm ci
 COPY widget-src ./widget-src
 RUN npm run build:widget
 
@@ -17,6 +17,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py music_state.py ./
 COPY --from=widget /src/dist ./dist
+COPY --from=widget /src/vendor/ncm-api ./vendor/ncm-api
+COPY --from=widget /usr/local/bin/node /usr/local/bin/node
 RUN useradd --create-home --uid 10001 music && mkdir -p /data && chown music:music /data
 USER music
 EXPOSE 3941
