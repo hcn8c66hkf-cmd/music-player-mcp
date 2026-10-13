@@ -241,7 +241,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
 
   // 时间
   const timeEl = document.createElement("div");
-  timeEl.style.cssText = `font-size:9px;color:${textMuted};flex-shrink:0;min-width:32px;text-align:right;";
+  timeEl.style.cssText = `font-size:9px;color:${textMuted};flex-shrink:0;min-width:32px;text-align:right;`;
   timeEl.textContent = fmtTime(data.duration);
 
   controls.append(btn, progressWrap, timeEl);
