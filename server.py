@@ -58,7 +58,7 @@ ALLOWED_AUDIO_HOST_SUFFIXES = tuple(
 if not os.getenv("MUSIC_EVENT_SIGNING_SECRET"):
     LOGGER.warning("MUSIC_EVENT_SIGNING_SECRET is unset; widget tokens will reset on restart")
 
-MUSIC_VIEW_URI = "ui://music-player/mcp-app-v2.html"
+MUSIC_VIEW_URI = "ui://music-player/mcp-app-v3.html"
 MUSIC_VIEW_MIME = "text/html;profile=mcp-app"
 AUDIO_STREAM_PATH = "/music-audio/stream"
 EVENT_PATH = "/music-state/event"
