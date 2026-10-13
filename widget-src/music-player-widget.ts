@@ -67,6 +67,24 @@ function fmtTime(secs: number): string {
   return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 }
 
+function colorLuminance(color: string): number | null {
+  const value = color.trim().replace("#", "");
+  const hex = value.length === 3
+    ? value.split("").map((char) => char + char).join("")
+    : value.slice(0, 6);
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+  const channels = [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+  const linear = channels.map((channel) =>
+    channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4)
+  );
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
+
+function averageLuminance(...colors: string[]): number {
+  const values = colors.map(colorLuminance).filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
 function render(data: MusicData, platform: "claude" | "chatgpt") {
   rendered = true;
   const root = document.getElementById("root");
@@ -77,6 +95,16 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
   const hasLyrics = lyricLines.length > 0;
   let lyricsOpen = false;
   let audioReady = false;
+
+  // Album palettes can be very light or very dark. Keep every label readable
+  // instead of assuming the card always has a dark background.
+  const lightBackground = averageLuminance(data.colorBg, data.colorBgEnd) > 0.42;
+  const textStrong = lightBackground ? "#352a1f" : "#f7f7f5";
+  const textMuted = lightBackground ? "rgba(53,42,31,0.72)" : "rgba(255,255,255,0.68)";
+  const textFaint = lightBackground ? "rgba(53,42,31,0.56)" : "rgba(255,255,255,0.48)";
+  const lineColor = lightBackground ? "rgba(53,42,31,0.24)" : "rgba(255,255,255,0.22)";
+  const trackColor = lightBackground ? "rgba(53,42,31,0.18)" : "rgba(255,255,255,0.18)";
+  const controlForeground = averageLuminance(data.colorPrimary, data.colorSecondary) > 0.46 ? "#2b241d" : "#ffffff";
 
   // ── 外层容器 ──
   const wrapper = document.createElement("div");
@@ -135,7 +163,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
 
   const title = document.createElement("div");
   title.textContent = data.songName;
-  title.style.cssText = `font-size:13px;font-weight:600;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;`;
+  title.style.cssText = `font-size:13px;font-weight:600;color:${textStrong};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;`;
 
   titleRow.appendChild(title);
 
@@ -146,13 +174,13 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
     lyricBtn.textContent = "词";
     lyricBtn.style.cssText = `
       width:22px;height:22px;border-radius:6px;flex-shrink:0;cursor:pointer;
-      font-size:10px;color:rgba(255,255,255,0.5);display:flex;align-items:center;justify-content:center;
-      border:1px solid rgba(255,255,255,0.15);transition:all 0.2s;`;
+      font-size:10px;color:${textMuted};display:flex;align-items:center;justify-content:center;
+      border:1px solid ${lineColor};transition:all 0.2s;`;
     lyricBtn.addEventListener("click", () => {
       lyricsOpen = !lyricsOpen;
       lyricPanel.style.display = lyricsOpen ? "block" : "none";
-      lyricBtn.style.color = lyricsOpen ? data.colorSecondary : "rgba(255,255,255,0.5)";
-      lyricBtn.style.borderColor = lyricsOpen ? data.colorSecondary + "66" : "rgba(255,255,255,0.15)";
+      lyricBtn.style.color = lyricsOpen ? textStrong : textMuted;
+      lyricBtn.style.borderColor = lyricsOpen ? textStrong : lineColor;
       reportHeight();
     });
     titleRow.appendChild(lyricBtn);
@@ -163,7 +191,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
   // 歌手
   const artist = document.createElement("div");
   artist.textContent = `${data.artistName}${data.selectedBy === "companion" ? " · 我选的" : " · 你点的"}`;
-  artist.style.cssText = `font-size:10px;color:rgba(255,255,255,0.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-2px;`;
+  artist.style.cssText = `font-size:10px;color:${textMuted};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-2px;`;
   content.appendChild(artist);
 
   // ── 控制栏 ──
@@ -179,15 +207,15 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 6px ${data.colorPrimary}44;transition:transform 0.1s,opacity 0.2s;`;
   btn.innerHTML =
-    `<svg class="i-play" width="11" height="12" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>` +
-    `<svg class="i-pause" width="11" height="12" viewBox="0 0 24 24" fill="white" style="display:none"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>`;
+    `<svg class="i-play" width="11" height="12" viewBox="0 0 24 24" fill="${controlForeground}"><path d="M8 5v14l11-7z"/></svg>` +
+    `<svg class="i-pause" width="11" height="12" viewBox="0 0 24 24" fill="${controlForeground}" style="display:none"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>`;
   const iPlay = btn.querySelector(".i-play") as SVGElement;
   const iPause = btn.querySelector(".i-pause") as SVGElement;
 
   // 加载指示
   const loadingEl = document.createElement("div");
   loadingEl.style.cssText = `display:none;position:absolute;inset:0;align-items:center;justify-content:center;`;
-  loadingEl.innerHTML = `<div style="width:10px;height:10px;border:2px solid white;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite"></div>`;
+  loadingEl.innerHTML = `<div style="width:10px;height:10px;border:2px solid ${controlForeground};border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite"></div>`;
   btn.style.position = "relative";
   btn.appendChild(loadingEl);
 
@@ -196,7 +224,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
   progressWrap.style.cssText = `flex:1;height:18px;display:flex;align-items:center;cursor:pointer;position:relative;`;
 
   const progressBg = document.createElement("div");
-  progressBg.style.cssText = `width:100%;height:3px;border-radius:2px;background:rgba(255,255,255,0.12);position:relative;overflow:visible;`;
+  progressBg.style.cssText = `width:100%;height:3px;border-radius:2px;background:${trackColor};position:relative;overflow:visible;`;
 
   const progressFill = document.createElement("div");
   progressFill.style.cssText = `width:0%;height:100%;border-radius:2px;background:linear-gradient(90deg, ${data.colorPrimary}, ${data.colorSecondary});transition:width 0.25s linear;position:relative;`;
@@ -213,7 +241,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
 
   // 时间
   const timeEl = document.createElement("div");
-  timeEl.style.cssText = "font-size:9px;color:rgba(255,255,255,0.4);flex-shrink:0;min-width:32px;text-align:right;";
+  timeEl.style.cssText = `font-size:9px;color:${textMuted};flex-shrink:0;min-width:32px;text-align:right;";
   timeEl.textContent = fmtTime(data.duration);
 
   controls.append(btn, progressWrap, timeEl);
@@ -238,7 +266,7 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
     const el = document.createElement("div");
     el.textContent = line.text;
     el.style.cssText = `
-      font-size:12px; color:rgba(255,255,255,0.3); padding:4px 0;
+      font-size:12px; color:${textFaint}; padding:4px 0;
       transition:color 0.3s, transform 0.3s; text-align:center;
       transform:scale(0.95); transform-origin:center;`;
     lyricPanel.appendChild(el);
@@ -315,11 +343,11 @@ function render(data: MusicData, platform: "claude" | "chatgpt") {
     activeLyricIdx = idx;
     for (let i = 0; i < lyricEls.length; i++) {
       if (i === idx) {
-        lyricEls[i].style.color = data.colorSecondary;
+        lyricEls[i].style.color = textStrong;
         lyricEls[i].style.transform = "scale(1)";
         lyricEls[i].scrollIntoView({ behavior: "smooth", block: "center" });
       } else {
-        lyricEls[i].style.color = "rgba(255,255,255,0.3)";
+        lyricEls[i].style.color = textFaint;
         lyricEls[i].style.transform = "scale(0.95)";
       }
     }
